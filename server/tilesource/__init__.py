@@ -22,6 +22,9 @@ import functools
 from .base import TileSource, getTileSourceFromDict, TileSourceException, \
     TileSourceAssetstoreException, TileOutputMimeTypes, TILE_FORMAT_IMAGE, \
     TILE_FORMAT_PIL, TILE_FORMAT_NUMPY
+import sys
+from girder import logger
+
 try:
     import girder
     from girder import logprint
@@ -36,6 +39,7 @@ AvailableTileSources = collections.OrderedDict()
 # tile source.
 getTileSource = functools.partial(getTileSourceFromDict,
                                   AvailableTileSources)
+
 
 __all__ = [
     'TileSource', 'TileSourceException', 'TileSourceAssetstoreException',
@@ -56,7 +60,9 @@ sourceList = [
     {'moduleName': '.pil', 'className': 'PILFileTileSource'},
     {'moduleName': '.pil', 'className': 'PILGirderTileSource', 'girder': True},
     {'moduleName': '.test', 'className': 'TestTileSource'},
-    {'moduleName': '.dummy', 'className': 'DummyTileSource'}
+    {'moduleName': '.dummy', 'className': 'DummyTileSource'},
+    {'moduleName': '.kfb', 'className': 'KFBFileTileSource'},
+    {'moduleName': '.kfb', 'className': 'KFBGirderTileSource', 'girder': True}
 ]
 
 for source in sourceList:
@@ -70,14 +76,21 @@ for source in sourceList:
         sourceModule = __import__(
             source['moduleName'].lstrip('.'), globals(), locals(), [className],
             len(source['moduleName']) - len(source['moduleName'].lstrip('.')))
+        logger.info('(#####)large_image/server/tilesource/__init__.py-sourceModule=' + str(sourceModule))
         sourceClass = getattr(sourceModule, className)
+        logger.info('(#####)large_image/server/tilesource/__init__.py-sourceClass=' + str(sourceClass))
         # Add the source class to the locals name so that it can be reached by
         # importing the tilesource module
         locals().update({className: sourceClass})
         # add it to our list of exports
         __all__.append(className)
+        logger.info('(#####)large_image/server/tilesource/__init__.py-__all__=' + str(__all__))
         # add it to our dictionary of available sources if it has a name
+        logger.info('(#####)large_image/server/tilesource/__init__.py-getattr(sourceClass, name, None)=' + str(getattr(sourceClass, 'name', None)))
         if getattr(sourceClass, 'name', None):
             AvailableTileSources[sourceClass.name] = sourceClass
     except (ImportError, OSError):
+        logger.info('(#####)large_image/server/tilesource/__init__.py-className=' + str(className))
+        logger.info('(#####)large_image/server/tilesource/__init__.py-ImportError=' + str(ImportError.message))
+        logger.info('(#####)large_image/server/tilesource/__init__.py-OSError=' + str(OSError.message))
         logprint.info('Notice: Could not import %s' % className)

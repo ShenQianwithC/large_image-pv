@@ -22,10 +22,10 @@ import os
 import pymongo
 import six
 import time
+from six import BytesIO
 
 from girder.constants import SortDir
 from girder.exceptions import ValidationException
-from girder.models.assetstore import Assetstore
 from girder.models.file import File
 from girder.models.item import Item
 from girder.models.setting import Setting
@@ -33,16 +33,29 @@ from girder.models.upload import Upload
 from girder.plugins.worker import utils as workerUtils
 from girder.plugins.jobs.constants import JobStatus
 from girder.plugins.jobs.models.job import Job
-
+from girder import logger
+from bson.objectid import ObjectId  
+from large_image.server.tilesource.base import TileSource as base
+    
 from .base import TileGeneralException
 from .. import constants
 from ..tilesource import AvailableTileSources, TileSourceException
 
+import sys
+# sys.path.append("/home/ken/usr/work/pvWeb/src/cython/r/")
+# import pCythonInterface as mmHandler
+import numpy as np
+import shutil
+import stat
+import traceback
+import PIL 
 
 class ImageItem(Item):
+    logger.info('(#####)large_image/server/models/image_item.py:ImageItem')
     # We try these sources in this order.  The first entry is the fallback for
     # items that antedate there being multiple options.
     def initialize(self):
+        logger.info('(#####)large_image/server/models/image_item.py:initialize')
         super(ImageItem, self).initialize()
         self.ensureIndices(['largeImage.fileId'])
         File().ensureIndices([([
@@ -53,6 +66,7 @@ class ImageItem(Item):
 
     def createImageItem(self, item, fileObj, user=None, token=None,
                         createJob=True, notify=False):
+        logger.info('(#####)large_image/server/models/image_item.py:createImageItem:fileObj=' + str(fileObj))
         # Using setdefault ensures that 'largeImage' is in the item
         if 'fileId' in item.setdefault('largeImage', {}):
             # TODO: automatically delete the existing large file
@@ -70,24 +84,36 @@ class ImageItem(Item):
 
         item['largeImage']['fileId'] = fileObj['_id']
         job = None
-        for sourceName in AvailableTileSources:
-            if getattr(AvailableTileSources[sourceName], 'girderSource',
-                       False):
-                if AvailableTileSources[sourceName].canRead(item):
-                    item['largeImage']['sourceName'] = sourceName
-                    break
-        if 'sourceName' not in item['largeImage'] and not createJob:
-            raise TileGeneralException(
-                'A job must be used to generate a largeImage.')
-        if 'sourceName' not in item['largeImage']:
-            # No source was successful
-            del item['largeImage']['fileId']
-            job = self._createLargeImageJob(item, fileObj, user, token)
-            item['largeImage']['expected'] = True
-            item['largeImage']['notify'] = notify
-            item['largeImage']['originalId'] = fileObj['_id']
-            item['largeImage']['jobId'] = job['_id']
 
+        fileName=str(item.get("lowerName"))
+        exten=fileName[-3:]
+        logger.info('(#####)large_image/server/models/image_item.py:createImageItem:exten=' + exten)
+        logger.info('(#####)large_image/server/models/image_item.py:createImageItem:AvailableTileSources=' + str(AvailableTileSources))
+        if exten != "kfb":
+            for sourceName in AvailableTileSources:
+                if getattr(AvailableTileSources[sourceName], 'girderSource',
+                           False):
+                    if AvailableTileSources[sourceName].canRead(item):
+                        item['largeImage']['sourceName'] = sourceName
+                        break
+                logger.info('(#####)large_image/server/models/image_item.py:createImageItem:item 1=' + str(item))
+            if 'sourceName' not in item['largeImage'] and not createJob:
+                logger.info('(#####)large_image/server/models/image_item.py:createImageItem:TileGeneralException=' + str(TileGeneralException))
+                raise TileGeneralException(
+                    'A job must be used to generate a largeImage.')
+            if 'sourceName' not in item['largeImage']:
+                logger.info('(#####)large_image/server/models/image_item.py:del')
+                # No source was successful
+                del item['largeImage']['fileId']
+                job = self._createLargeImageJob(item, fileObj, user, token)
+                item['largeImage']['expected'] = True
+                item['largeImage']['notify'] = notify
+                item['largeImage']['originalId'] = fileObj['_id']
+                item['largeImage']['jobId'] = job['_id']
+        else: # kfb file
+            item['largeImage']['sourceName'] = 'kfb'
+
+        logger.info('(#####)large_image/server/models/image_item.py:createImageItem:item = ' + str(item))
         self.save(item)
         return job
 
@@ -188,14 +214,18 @@ class ImageItem(Item):
     @classmethod
     def _loadTileSource(cls, item, **kwargs):
         if 'largeImage' not in item:
+            logger.info('(#####)large_image/server/models/image_item.py:_loadTileSource:TileSourceException1')
             raise TileSourceException('No large image file in this item.')
         if item['largeImage'].get('expected'):
+            logger.info('(#####)large_image/server/models/image_item.py:_loadTileSource:TileSourceException2')
             raise TileSourceException('The large image file for this item is '
                                       'still pending creation.')
 
         sourceName = item['largeImage']['sourceName']
-
+        logger.info('(#####)large_image/server/models/image_item.py:_loadTileSource:item='+str(item))
+        logger.info('(#####)large_image/server/models/image_item.py:_loadTileSource:kwargs='+str(kwargs))
         tileSource = AvailableTileSources[sourceName](item, **kwargs)
+        logger.info('(#####)large_image/server/models/image_item.py:_loadTileSource:tileSource='+str(tileSource))
         return tileSource
 
     def getMetadata(self, item, **kwargs):
@@ -203,12 +233,160 @@ class ImageItem(Item):
         return tileSource.getMetadata()
 
     def getTile(self, item, x, y, z, mayRedirect=False, **kwargs):
+#         traceback.print_stack()
+        logger.info('(#####)large_image/server/models/image_item.py:getTile():x, y, z='+str(x)+', '+str(y)+', '+str(z))
         tileSource = self._loadTileSource(item, **kwargs)
-        tileData = tileSource.getTile(x, y, z, mayRedirect=mayRedirect)
         tileMimeType = tileSource.getTileMimeType()
+        self.levels =10
+        fileName=str(item.get("lowerName"))
+        exten=fileName[-3:]
+        logger.info('(#####)large_image/server/models/image_item.py:getTile():exten=' + exten)
+#         if exten != "kfb":
+        tileData = tileSource.getTile(x, y, z, mayRedirect=mayRedirect)
+#         else:
+#             scale = 2 ** (self.levels - 1 - z)
+#             offsetx = x * 240 * scale
+#             offsety = y * 240 * scale
+#             svslevel={'svslevel': 0, 'scale':1}
+#             tile = PIL.Image.new("RGB", (240 * svslevel['scale'], 240 * svslevel['scale']), 'green')
+#     
+#             topLeftX = offsetx
+#             topLeftY = offsety
+#             level = svslevel['svslevel']
+#             szX = 240 * svslevel['scale']
+#             szY = 240 * svslevel['scale']
+#             
+#             l2sHash = dict((('0', 40), ('1',10), ('2',2.5),('3',0.6)))
+#             iii = np.zeros([szY, szX, 3], dtype=np.uint8)
+# 
+#             logger.info('(#####)large_image/server/tilesource/image_item.py-getTile:level='+str(level))
+#             logger.info('(#####)large_image/server/tilesource/image_item.py-getTile:l2sHash='+str(l2sHash))
+#             scale = l2sHash[str(level)]
+#             scale = 40            
+#             id = item['largeImage']['fileId']
+#             logger.info('(#####)large_image/server/tilesource/image_item.py-getTile:id='+str(id))
+#             file = File().findOne({'_id': ObjectId(id)})
+# 
+#             fileName=str(os.path.join("/opt/histomicstk/assetstore", file["path"]))
+#             fileName_temp=str(os.path.join("/opt/histomicstk/assetstore", file["path"][0:5], "temp.kfb"))
+#             logger.info('(#####)large_image/server/tilesource/svs-getTile:fileName='+(fileName_temp))
+#             mmHandler.extractKFSlideRegionToUcharArray(fileName_temp, topLeftX, topLeftY, scale, szX, szY, iii)        
+# 
+#             tile = PIL.Image.fromarray(iii.astype('uint8'), 'RGB')
+#             tileData = self._outputTile(tile, 'PIL', x, y, z, False, **kwargs)
+        logger.info('(#####)large_image/server/models/image_item.py:getTile():tileMimeType='+str(tileMimeType))
+        logger.info('(#####)large_image/server/models/image_item.py:getTile():tileData='+str(tileData)[:10])
         return tileData, tileMimeType
 
-    def delete(self, item, skipFileIds=None):
+    def _outputTile(self, tile, tileEncoding, x, y, z, pilImageAllowed=False, **kwargs):
+        """
+        Convert a tile from a PIL image or image in memory to the desired
+        encoding.
+
+        :param tile: the tile to convert.
+        :param tileEncoding: the current tile encoding.
+        :param x: tile x value.  Used for cropping or edge adjustment.
+        :param y: tile y value.  Used for cropping or edge adjustment.
+        :param z: tile z (level) value.  Used for cropping or edge adjustment.
+        :param pilImageAllowed: True if a PIL image may be returned.
+        :returns: either a PIL image or a memory object with an image file.
+        """
+
+        isEdge = False
+        self.edge = False
+        if self.edge:
+            sizeX = int(self.sizeX * 2 ** (z - (self.levels - 1)))
+            sizeY = int(self.sizeY * 2 ** (z - (self.levels - 1)))
+            maxX = (x + 1) * self.tileWidth
+            maxY = (y + 1) * self.tileHeight
+            isEdge = maxX > sizeX or maxY > sizeY
+        if tileEncoding != 'PIL':
+            if tileEncoding == self.encoding and not isEdge:
+                return tile
+            tile = PIL.Image.open(BytesIO(tile))
+        if isEdge:
+            contentWidth = min(self.tileWidth,
+                               sizeX - (maxX - self.tileWidth))
+            contentHeight = min(self.tileHeight,
+                                sizeY - (maxY - self.tileHeight))
+            if self.edge in (True, 'crop'):
+                tile = tile.crop((0, 0, contentWidth, contentHeight))
+            else:
+                color = PIL.ImageColor.getcolor(self.edge, tile.mode)
+                if contentWidth < self.tileWidth:
+                    PIL.ImageDraw.Draw(tile).rectangle(
+                        [(contentWidth, 0), (self.tileWidth, contentHeight)],
+                        fill=color, outline=None)
+                if contentHeight < self.tileHeight:
+                    PIL.ImageDraw.Draw(tile).rectangle(
+                        [(0, contentHeight), (self.tileWidth, self.tileHeight)],
+                        fill=color, outline=None)
+        if pilImageAllowed:
+            logger.info('(#####)large_image/server/models/image_item.py:getTile():tile='+str(tile))
+            return tile
+        TileOutputPILFormat={'JFIF': 'JPEG'}
+        encoding='JPEG'
+        encoding = TileOutputPILFormat.get(encoding, encoding)
+        if encoding == 'JPEG' and tile.mode not in ('L', 'RGB'):
+            tile = tile.convert('RGB')
+        # If we can't redirect, but the tile is read from a file in the desired
+        # output format, just read the file
+        if hasattr(tile, 'fp') and self._pilFormatMatches(tile):
+            tile.fp.seek(0)
+            logger.info('(#####)large_image/server/models/image_item.py:getTile():tile.fp.read()='+str(tile.fp.read()))
+            return tile.fp.read()
+        output = BytesIO()
+        jpegQuality = 95
+        jpegSubsampling = 0
+        tiffCompression = 'raw'
+        tile.save(
+            output, encoding, quality=jpegQuality,
+            subsampling=jpegSubsampling, compression=tiffCompression)
+#         logger.info('(#####)large_image/server/models/image_item.py:getTile():output.getvalue()='+str(output.getvalue()))
+        return output.getvalue()
+
+    def _pilFormatMatches(self, image, match=True, **kwargs):
+        """
+        Determine if the specified PIL image matches the format of the tile
+        source with the specified arguments.
+
+        :param image: the PIL image to check.
+        :param match: if 'any', all image encodings are considered matching,
+            if 'encoding', then a matching encoding matches regardless of
+            quality options, otherwise, only match if the encoding and quality
+            options match.
+        :param **kwargs: additional parameters to use in determining format.
+        """
+        logger.info('(#####)large_image/server/tilesource/base.py:_pilFormatMatches')
+
+        TileOutputPILFormat = {
+            'JFIF': 'JPEG'
+        }
+        encoding = TileOutputPILFormat.get(self.encoding, self.encoding)
+        if match == 'any' and encoding in ('PNG', 'JPEG'):
+            return True
+        if image.format != encoding:
+            return False
+        if encoding == 'PNG':
+            return True
+        if encoding == 'JPEG':
+            if match == 'encoding':
+                return True
+            originalQuality = None
+            try:
+                if image.format == 'JPEG' and hasattr(image, 'quantization'):
+                    if image.quantization[0][58] <= 100:
+                        originalQuality = int(100 - image.quantization[0][58] / 2)
+                    else:
+                        originalQuality = int(5000.0 / 2.5 / image.quantization[0][15])
+            except Exception:
+                return False
+            return abs(originalQuality - self.jpegQuality) <= 1
+        # We fail for the TIFF file format; it is general enough that ensuring
+        # compatibility could be an issue.
+        return False
+
+    def delete(self, item):
         deleted = False
         if 'largeImage' in item:
             job = None
@@ -241,9 +419,7 @@ class ImageItem(Item):
                 assert item['largeImage']['originalId'] != \
                     item['largeImage'].get('fileId')
 
-                if ('fileId' in item['largeImage'] and (
-                        not skipFileIds or
-                        item['largeImage']['fileId'] not in skipFileIds)):
+                if 'fileId' in item['largeImage']:
                     file = File().load(id=item['largeImage']['fileId'], force=True)
                     if file:
                         File().remove(file)
@@ -257,6 +433,7 @@ class ImageItem(Item):
         return deleted
 
     def getThumbnail(self, item, width=None, height=None, **kwargs):
+        logger.info('(#####)large_image/server/models/image_item.py:getThumbnail:item='+str(item))
         """
         Using a tile source, get a basic thumbnail.  Aspect ratio is
         preserved.  If neither width nor height is given, a default value is
@@ -274,10 +451,6 @@ class ImageItem(Item):
         """
         # check if a thumbnail file exists with a particular key
         keydict = dict(kwargs, width=width, height=height)
-        return self._getAndCacheImage(
-            item, 'getThumbnail', keydict, width=width, height=height, **kwargs)
-
-    def _getAndCacheImage(self, item, imageFunc, keydict, **kwargs):
         if 'fill' in keydict and (keydict['fill']).lower() == 'none':
             del keydict['fill']
         keydict = {k: v for k, v in six.viewitems(keydict) if v is not None}
@@ -288,6 +461,7 @@ class ImageItem(Item):
             'isLargeImageThumbnail': True,
             'thumbnailKey': key
         })
+        logger.info('(#####)large_image/server/models/image_item.py:getThumbnail:existing='+str(existing))
         if existing:
             if kwargs.get('contentDisposition') != 'attachment':
                 contentDisposition = 'inline'
@@ -295,15 +469,18 @@ class ImageItem(Item):
                 contentDisposition = kwargs['contentDisposition']
             return File().download(existing, contentDisposition=contentDisposition)
         tileSource = self._loadTileSource(item, **kwargs)
-        result = getattr(tileSource, imageFunc)(**kwargs)
-        if result is None:
-            thumbData, thumbMime = b'', 'application/octet-stream'
-        else:
-            thumbData, thumbMime = result
+        logger.info('(#####)large_image/server/models/image_item.py:getThumbnail:tileSource = ' + str(tileSource))
+        thumbData, thumbMime = tileSource.getThumbnail(
+            width, height, **kwargs)
+        logger.info('(#####)large_image/server/models/image_item.py:getThumbnail:thumbData = ' + str(thumbData)[:10])
+        logger.info('(#####)large_image/server/models/image_item.py:getThumbnail:thumbMime = ' + str(thumbMime))
+
         # The logic on which files to save could be more sophisticated.
         maxThumbnailFiles = int(Setting().get(
             constants.PluginSettings.LARGE_IMAGE_MAX_THUMBNAIL_FILES))
         saveFile = maxThumbnailFiles > 0
+        logger.info('(#####)large_image/server/models/image_item.py:getThumbnail:maxThumbnailFiles = ' + str(maxThumbnailFiles))
+        logger.info('(#####)large_image/server/models/image_item.py:getThumbnail:saveFile = ' + str(saveFile))
         if saveFile:
             # Make sure we don't exceed the desired number of thumbnails
             self.removeThumbnailFiles(item, maxThumbnailFiles - 1)
@@ -312,17 +489,16 @@ class ImageItem(Item):
                 six.BytesIO(thumbData), size=len(thumbData),
                 name='_largeImageThumbnail', parentType='item', parent=item,
                 user=None, mimeType=thumbMime, attachParent=True)
-            if not len(thumbData) and 'received' in thumbfile:
-                thumbfile = Upload().finalizeUpload(
-                    thumbfile, Assetstore().load(thumbfile['assetstoreId']))
+            logger.info('(#####)large_image/server/models/image_item.py:getThumbnail:thumbfile = ' + str(thumbfile))
             thumbfile.update({
                 'isLargeImageThumbnail': True,
                 'thumbnailKey': key,
             })
             # Ideally, we would check that the file is still wanted before we
-            # save it.  This is probably impossible without true transactions in
+            # save it.  This is probably imposible without true transactions in
             # Mongo.
             File().save(thumbfile)
+            logger.info('(#####)large_image/server/models/image_item.py:getThumbnail:save = ')
         # Return the data
         return thumbData, thumbMime
 
@@ -416,6 +592,5 @@ class ImageItem(Item):
         :returns: imageData, imageMime: the image data and the mime type, or
             None if the associated image doesn't exist.
         """
-        keydict = dict(kwargs, imageKey=imageKey)
-        return self._getAndCacheImage(
-            item, 'getAssociatedImage', keydict, imageKey=imageKey, **kwargs)
+        tileSource = self._loadTileSource(item, **kwargs)
+        return tileSource.getAssociatedImage(imageKey, *args, **kwargs)

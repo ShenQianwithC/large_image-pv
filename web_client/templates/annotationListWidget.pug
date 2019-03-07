@@ -1,14 +1,14 @@
 if annotations.length
   .g-annotation-list-header
     i.icon-pencil
-    | Annotations
+    | 标注
 
   table.g-annotation-list.table.table-hover.table-condensed
     thead
       th.g-annotation-toggle
-      th.g-annotation-name Name
-      th.g-annotation-user Creator
-      th.g-annotation-date Date
+      th.g-annotation-name 名称
+      th.g-annotation-user 标注者
+      th.g-annotation-date 标注日期
       th.g-annotation-actions
     tbody
       for annotation in annotations.models
@@ -17,22 +17,21 @@ if annotations.length
         - var creator = creatorModel ? creatorModel.get('login') : annotation.get('creatorId');
         tr.g-annotation-row(data-annotation-id=annotation.id)
           td.g-annotation-toggle
-            input(type='checkbox', disabled=!canDraw, checked=drawn.has(annotation.id), title='Show annotation')
+
           td.g-annotation-name(title=name)
             = name
 
           td.g-annotation-user
-            a(href=`#user/${annotation.get('creatorId')}`)
-              = creator
+            = 创建者
 
           td.g-annotation-date
             = (new Date(annotation.get('created'))).toLocaleString()
           td.g-annotation-actions
-            a.g-annotation-download(href=`${apiRoot}/annotation/${annotation.id}`, title='Download', download=`${name}.json`)
+            a.g-annotation-download(href=`${apiRoot}/annotation/${annotation.id}`, title='下载标注', download=`${name}.json`)
               i.icon-download
-            if annotation.get('_accessLevel') >= AccessType.ADMIN
-              a.g-annotation-permissions(title='Adjust permissions')
-                i.icon-lock
-            if annotation.get('_accessLevel') >= AccessType.WRITE
-              a.g-annotation-delete(title='Delete')
-                i.icon-cancel
+//             if annotation.get('_accessLevel') >= AccessType.ADMIN
+//               a.g-annotation-permissions(title='Adjust permissions')
+//                 i.icon-lock
+//             if annotation.get('_accessLevel') >= AccessType.WRITE
+//               a.g-annotation-delete(title='删除')
+//                 i.icon-trash

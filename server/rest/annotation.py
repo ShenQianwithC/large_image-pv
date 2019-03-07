@@ -21,6 +21,9 @@ import json
 import ujson
 
 import cherrypy
+import traceback
+from xml.etree.ElementTree import Element, SubElement, ElementTree
+from xml.etree import ElementTree as etree
 
 from girder import logger
 from girder.api import access
@@ -33,11 +36,14 @@ from girder.models.user import User
 from girder.utility import JsonEncoder
 from ..models.annotation import AnnotationSchema, Annotation
 from ..models.annotationelement import Annotationelement
+from __builtin__ import str
+from bson.objectid import ObjectId   
 
 
 class AnnotationResource(Resource):
 
     def __init__(self):
+        print('(#####):large_image/server/rest/annotation.py:__init__()')
         super(AnnotationResource, self).__init__()
 
         self.resourceName = 'annotation'
@@ -74,6 +80,7 @@ class AnnotationResource(Resource):
     @access.public
     @filtermodel(model='annotation', plugin='large_image')
     def find(self, params):
+        print('(#####):large_image/server/rest/annotation.py:find()')
         limit, offset, sort = self.getPagingParameters(params, 'lowerName')
         query = {'_active': {'$ne': False}}
         if 'itemId' in params:
@@ -110,6 +117,7 @@ class AnnotationResource(Resource):
     )
     @access.public
     def getAnnotationSchema(self, params):
+        print('(#####):large_image/server/rest/annotation.py:getAnnotationSchema()')
         return AnnotationSchema.annotationSchema
 
     @describeRoute(
@@ -148,12 +156,12 @@ class AnnotationResource(Resource):
     @access.public
     def getAnnotation(self, id, params):
         user = self.getCurrentUser()
+        print('(#####):large_image/server/rest/annotation.py-getAnnotation():anno_results='+str(self._getAnnotation(user, id, params)))
         return self._getAnnotation(user, id, params)
 
     def _getAnnotation(self, user, id, params):
         """
         Get a generator function that will yield the json of an annotation.
-
         :param user: the user that needs read access on the annoation and its
             parent item.
         :param id: the annotation id.
@@ -175,13 +183,22 @@ class AnnotationResource(Resource):
         breakStr = b'"elements": ['
         base = json.dumps(annotation, sort_keys=True, allow_nan=False,
                           cls=JsonEncoder).encode('utf8').split(breakStr)
+        print('(#####):large_image/server/rest/annotation.py-_getAnnotation():base='+str(base))
 
         def generateResult():
+#             print('(#####):generateResult():headers='+ str(cherrypy.response.headers))
+#             print('(#####):generateResult():stream='+ str(cherrypy.response.stream))
+#             print('(#####):generateResult():status='+ str(cherrypy.response.status))
+#             print('(#####):generateResult():cookie='+ str(cherrypy.response.cookie))
+
+#             print('(#####):generateResult():headers.elements='+ str(cherrypy.request.headers.elements))
+#             print('(#####):generateResult():headers='+ str(cherrypy.request.headers))
+#             print('(#####):generateResult():cookie='+ str(cherrypy.request.cookie))
+
             info = {}
             idx = 0
             yield base[0]
             yield breakStr
-            collect = []
             for element in Annotationelement().yieldElements(annotation, params, info):
                 # The json conversion is fastest if we use defaults as much as
                 # possible.  The only value in an annotation element that needs
@@ -191,25 +208,122 @@ class AnnotationResource(Resource):
                 # Use ujson; it is much faster.  The standard json library
                 # could be used in its most default mode instead like so:
                 #   result = json.dumps(element, separators=(',', ':'))
-                # Collect multiple elements before emitting them.  This
-                # balances using less memoryand streaming right away with
-                # efficiency in dumping the json.  Experimentally, 100 is
-                # significantly faster than 10 and not much slower than 1000.
-                collect.append(element)
-                if len(collect) >= 100:
-                    yield (b',' if idx else b'') + ujson.dumps(collect).encode('utf8')[1:-1]
-                    idx += 1
-                    collect = []
-            if len(collect):
-                yield (b',' if idx else b'') + ujson.dumps(collect).encode('utf8')[1:-1]
+                result = ujson.dumps(element)
+                result = (b',' if idx else b'') + result.encode('utf8')
+                yield result
+                idx += 1
             yield base[1].rstrip().rstrip(b'}')
             yield b', "_elementQuery": '
             yield json.dumps(
                 info, sort_keys=True, allow_nan=False, cls=JsonEncoder).encode('utf8')
             yield b'}'
 
+        def generateResultAno(id, params):
+            traceback.print_stack()
+            print('(#####):generateResultAno():headers='+ str(cherrypy.response.headers))
+#             print('(#####):generateResultAno():stream='+ str(cherrypy.response.stream))
+#             print('(#####):generateResultAno():status='+ str(cherrypy.response.status))
+#             print('(#####):generateResulAnot():cookie='+ str(cherrypy.response.cookie))
+
+#             print('(#####):generateResultAno():headers.elements='+ str(cherrypy.request.headers.elements))
+#             print('(#####):generateResultAno():headers='+ str(cherrypy.request.headers))
+#             print('(#####):generateResultAno():cookie='+ str(cherrypy.request.cookie))
+#             yield '<?xml version="1.0" encoding="gb2312"?>'
+            root = Element('Slide')
+            annotations = SubElement(root, 'Annotations')
+            regions = SubElement(annotations, 'Regions')
+            info = {}
+            for element in Annotationelement().yieldElements(annotation, params, info):
+                print('(#####):generateResultAno():headers.elements='+ str(cherrypy.request.headers.elements))
+                height=element.get("height")
+                width=element.get("width")
+                fillColor=element.get("fillColor")
+                lineColor=element.get("lineColor")
+                lineWidth=element.get("lineWidth")
+                center=element.get("center")
+                type_pv=element.get("type")
+
+                region = SubElement(regions, 'Region')
+                region.set('Detail', "")
+                region.set('FontItalic', 'False')
+                region.set('FontBold', 'False')
+                region.set('MsVisble', 'True')
+                region.set('Hidden', 'Visible')
+                region.set('Zoom', '0.5')
+                region.set('Visible', "Visible")
+                region.set('Color', '4282056448')
+
+                if type_pv=="rectangle":
+                    region.set('Guid', 'Rectangle')
+                    region.set('Name', 'JuXing')
+                    region.set('FontSize', '12')
+                    region.set('Size', str(lineWidth))
+                    region.set('FigureType', 'Rectangle')
+                    region.set('PinType', 'images/pin_1.png')
+
+                    vertices = SubElement(region, 'Vertices')
+                    vertice = SubElement(vertices, 'Vertice')
+                    vertice.set('X', str((center[0]-(width/2))/40))
+                    vertice.set('Y', str((center[1]-(height/2))/40))
+                    vertice = SubElement(vertices, 'Vertice')
+                    vertice.set('X', str((center[0]+(width/2))/40))
+                    vertice.set('Y', str((center[1]+(height/2))/40))
+
+                elif type_pv=="polyline":
+                    region.set('Guid', 'Polygon')
+                    region.set('Name', 'QuXian')
+                    region.set('FontSize', '12')
+                    region.set('Size', str(lineWidth))
+                    region.set('FigureType', 'Polygon')
+                    region.set('PinType', 'images/pin_1.png')
+                    vertices = SubElement(region, 'Vertices')
+                    points=element.get("points")
+                    for point in points:
+                        vertice = SubElement(vertices, 'Vertice')
+                        vertice.set('X', str(point[0]/40))
+                        vertice.set('Y', str(point[1]/40))
+                else : # type=="line"
+                    region.set('Guid', 'Remark')
+                    region.set('Name', 'BiaoZhu')
+                    region.set('FontSize', '12')
+                    region.set('Size', str(lineWidth))
+                    region.set('FigureType', 'Remark')
+                    region.set('PinType', 'images/pin_4.png')
+
+                    vertices = SubElement(region, 'Vertices')
+                    vertice = SubElement(vertices, 'Vertice')
+                    vertice.set('X', str(center[0]/40))
+                    vertice.set('Y', str(center[1]/40))
+
+#                 vertices = SubElement(region, 'Vertices')
+#                 for point in points:
+#                     vertice = SubElement(vertices, 'Vertice')
+#                     vertice.set('X', str(point[0]))
+#                     vertice.set('Y', str(point[1]))
+                #tree = ElementTree(root)
+            head='<?xml version="1.0" encoding="utf-8"?>'
+            print('(#####):generateResult():id='+ str(id))
+            annotation_1 = Annotation().findOne({'_id': ObjectId(id)})
+            print('(#####):generateResult():item='+ str(annotation_1))
+            print('(#####):generateResult():itemId='+ str(annotation_1["itemId"]))
+            item=Item().findOne({'_id': annotation_1["itemId"]})
+            print('(#####):generateResult():name='+ str(item["name"]))
+            name = item["name"]
+            cherrypy.response.headers.update({'Content-Type': 'application/html',
+                                              'Content-Disposition': 'attachment; filename=' + name +'.Ano'})
+            xml_resut=(head + etree.tostring(root).encode('utf-8'))
+            print('(#####):generateResult():xml_resut='+ xml_resut)
+            return xml_resut
+
         setResponseHeader('Content-Type', 'application/json')
-        return generateResult
+
+        accept = cherrypy.request.headers.elements('Accept')
+        if accept:
+            print('(#####):generateResult():Accept 1='+ str(accept))
+            return generateResult
+        else:
+            print('(#####):generateResult():Accept 2='+ str(accept))
+            return generateResultAno(id, params)
 
     @describeRoute(
         Description('Create an annotation.')
@@ -226,6 +340,7 @@ class AnnotationResource(Resource):
     @loadmodel(map={'itemId': 'item'}, model='item', level=AccessType.WRITE)
     @filtermodel(model='annotation', plugin='large_image')
     def createAnnotation(self, item, params):
+        print('(#####):large_image/server/rest/annotation.py:createAnnotation()')
         try:
             return Annotation().createAnnotation(
                 item, self.getCurrentUser(), self.getBodyJson())
@@ -248,6 +363,7 @@ class AnnotationResource(Resource):
     @loadmodel(model='annotation', plugin='large_image', level=AccessType.READ)
     @filtermodel(model='annotation', plugin='large_image')
     def copyAnnotation(self, annotation, params):
+        print('(#####):large_image/server/rest/annotation.py:copyAnnotation()')
         itemId = params['itemId']
         user = self.getCurrentUser()
         Item().load(annotation.get('itemId'),
@@ -274,6 +390,7 @@ class AnnotationResource(Resource):
     @loadmodel(model='annotation', plugin='large_image', level=AccessType.WRITE)
     @filtermodel(model='annotation', plugin='large_image')
     def updateAnnotation(self, annotation, params):
+        print('(#####):large_image/server/rest/annotation.py:updateAnnotation()')
         user = self.getCurrentUser()
         item = Item().load(annotation.get('itemId'), force=True)
         if item is not None:
@@ -314,6 +431,7 @@ class AnnotationResource(Resource):
     # Load with a limit of 1 so that we don't bother getting most annotations
     @loadmodel(model='annotation', plugin='large_image', getElements=False, level=AccessType.WRITE)
     def deleteAnnotation(self, annotation, params):
+        print('(#####):large_image/server/rest/annotation.py:deleteAnnotation()')
         # Ensure that we have write access to the parent item
         item = Item().load(annotation.get('itemId'), force=True)
         if item is not None:
@@ -336,6 +454,7 @@ class AnnotationResource(Resource):
     )
     @access.public
     def findAnnotatedImages(self, params):
+        print('(#####):large_image/server/rest/annotation.py:findAnnotatedImages()')
         limit, offset, sort = self.getPagingParameters(
             params, 'updated', SortDir.DESCENDING)
         user = self.getCurrentUser()
@@ -358,6 +477,7 @@ class AnnotationResource(Resource):
     @access.user
     @loadmodel(model='annotation', plugin='large_image', getElements=False, level=AccessType.ADMIN)
     def getAnnotationAccess(self, annotation, params):
+        print('(#####):large_image/server/rest/annotation.py:getAnnotationAccess()')
         return Annotation().getFullAccessList(annotation)
 
     @describeRoute(
@@ -373,6 +493,7 @@ class AnnotationResource(Resource):
     @loadmodel(model='annotation', plugin='large_image', getElements=False, level=AccessType.ADMIN)
     @filtermodel(model=Annotation, addFields={'access'})
     def updateAnnotationAccess(self, annotation, params):
+        print('(#####):large_image/server/rest/annotation.py:updateAnnotationAccess()')
         access = json.loads(params['access'])
         public = self.boolParam('public', params, False)
         annotation = Annotation().setPublic(annotation, public)
@@ -394,6 +515,7 @@ class AnnotationResource(Resource):
     @access.cookie
     @access.public
     def getAnnotationHistoryList(self, id, limit, offset, sort):
+        print('(#####):large_image/server/rest/annotation.py:getAnnotationHistoryList()')
         return list(Annotation().versionList(id, self.getCurrentUser(), limit, offset, sort))
 
     @autoDescribeRoute(
@@ -407,6 +529,7 @@ class AnnotationResource(Resource):
     @access.cookie
     @access.public
     def getAnnotationHistory(self, id, version):
+        print('(#####):large_image/server/rest/annotation.py:getAnnotationHistory()')
         result = Annotation().getVersion(id, version, self.getCurrentUser())
         if result is None:
             raise RestException('Annotation history version not found.')
@@ -426,6 +549,7 @@ class AnnotationResource(Resource):
     )
     @access.public
     def revertAnnotationHistory(self, id, version):
+        print('(#####):large_image/server/rest/annotation.py:revertAnnotationHistory()')
         annotation = Annotation().revertVersion(id, version, self.getCurrentUser())
         if not annotation:
             raise RestException('Annotation history version not found.')
@@ -442,8 +566,10 @@ class AnnotationResource(Resource):
     )
     @access.public
     def getItemAnnotations(self, item):
+        print('(#####):large_image/server/rest/annotation.py:getItemAnnotations():item='+str(item))
         user = self.getCurrentUser()
         query = {'_active': {'$ne': False}, 'itemId': item['_id']}
+        print('(#####):large_image/server/rest/annotation.py:getItemAnnotations():itemId='+str(query['itemId']))
 
         def generateResult():
             yield b'['
@@ -478,6 +604,7 @@ class AnnotationResource(Resource):
     )
     @access.user
     def createItemAnnotations(self, item, annotations):
+        print('(#####):large_image/server/rest/annotation.py:createItemAnnotations()')
         user = self.getCurrentUser()
         for entry in annotations:
             if not isinstance(entry, dict):

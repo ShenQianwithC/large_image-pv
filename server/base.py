@@ -35,6 +35,9 @@ from .models.image_item import ImageItem
 from .loadmodelcache import invalidateLoadModelCache
 from . import cache_util
 
+import sys
+print('(#####)large_image/server/base.py')
+
 
 def _postUpload(event):
     """
@@ -120,12 +123,16 @@ def _updateJob(event):
 
 def checkForLargeImageFiles(event):
     file = event.info
+    print('(#####)large_image/server/base.py:checkForLargeImageFiles:file=' + str(file))
     possible = False
     mimeType = file.get('mimeType')
+    print('(#####)large_image/server/base.py:checkForLargeImageFiles:mimeType=' + str(mimeType))
     if mimeType in ('image/tiff', 'image/x-tiff', 'image/x-ptif'):
         possible = True
     exts = file.get('exts')
-    if exts and exts[-1] in ('svs', 'ptif', 'tif', 'tiff', 'ndpi', 'mrxs'):
+    print('(#####)large_image/server/base.py:checkForLargeImageFiles:exts=' + str(exts))
+#     if exts and exts[-1] in ('svs', 'ptif', 'tif', 'tiff', 'ndpi', 'mrxs'):
+    if exts and exts[-1] in ('svs', 'ptif', 'tif', 'tiff', 'ndpi', 'mrxs', 'kfb'):
         possible = True
     if not file.get('itemId') or not possible:
         return
@@ -135,8 +142,10 @@ def checkForLargeImageFiles(event):
     if not item or item.get('largeImage'):
         return
     try:
+        logger.info('(#####)large_image/server/base.py:checkForLargeImageFiles:item=' + str(item))
         ImageItem().createImageItem(item, file, createJob=False)
     except Exception:
+        print('(#####)large_image/server/base.py:checkForLargeImageFiles:Exception=' + str(Exception.message))
         # We couldn't automatically set this as a large image
         logger.info('Saved file %s cannot be automatically used as a '
                     'largeImage' % str(file['_id']))
@@ -175,18 +184,6 @@ def handleCopyItem(event):
             if pos is not None and 0 <= pos < len(files):
                 li[key] = files[pos]['_id']
         Item().save(newItem, triggerEvents=False)
-
-
-def handleRemoveFile(event):
-    """
-    When a file is removed, check if it is a largeImage fileId.  If so, delete
-    the largeImage record.
-    """
-    fileObj = event.info
-    if fileObj.get('itemId'):
-        item = Item().load(fileObj['itemId'], force=True, exc=False)
-        if item and 'largeImage' in item and item['largeImage'].get('fileId') == fileObj['_id']:
-            ImageItem().delete(item, [fileObj['_id']])
 
 
 # Validators
@@ -275,6 +272,7 @@ def load(info):
     TilesItemResource(info['apiRoot'])
     info['apiRoot'].large_image = LargeImageResource()
     info['apiRoot'].annotation = AnnotationResource()
+    print('(#####) large_image/server/load.py:')
 
     Item().exposeFields(level=AccessType.READ, fields='largeImage')
     # Ask for some models to make sure their singletons are initialized.
@@ -297,4 +295,3 @@ def load(info):
                 checkForLargeImageFiles)
     events.bind('model.item.remove', 'large_image', removeThumbnails)
     events.bind('server_fuse.unmount', 'large_image', cache_util.cachesClear)
-    events.bind('model.file.remove', 'large_image', handleRemoveFile)

@@ -37,11 +37,15 @@ from ..tilesource.base import TileInputUnits
 
 from .. import loadmodelcache
 
+import sys
+import traceback
+print('(#####):large_image/server/rest/tiles.py')
 
 MimeTypeExtensions = {
     'image/jpeg': 'jpg',
     'image/png': 'png',
     'image/tiff': 'tiff',
+    'image/kfb': 'kfb',
 }
 ImageMimeTypes = list(MimeTypeExtensions)
 
@@ -80,6 +84,7 @@ class TilesItemResource(ItemResource):
         apiRoot.item.route('POST', (':itemId', 'tiles'), self.createTiles)
         apiRoot.item.route('GET', (':itemId', 'tiles'), self.getTilesInfo)
         apiRoot.item.route('DELETE', (':itemId', 'tiles'), self.deleteTiles)
+        print('(#####)large_image/server/rest/tiles.py:__init__:')
         apiRoot.item.route('GET', (':itemId', 'tiles', 'thumbnail'),
                            self.getTilesThumbnail)
         apiRoot.item.route('GET', (':itemId', 'tiles', 'region'),
@@ -115,6 +120,7 @@ class TilesItemResource(ItemResource):
     @loadmodel(model='item', map={'itemId': 'item'}, level=AccessType.WRITE)
     @filtermodel(model='job', plugin='jobs')
     def createTiles(self, item, params):
+        print('(#####)large_image/server/rest/tile.py:createTiles:item=' + str(item))
         largeImageFileId = params.get('fileId')
         if largeImageFileId is None:
             files = list(Item().childFiles(item=item, limit=2))
@@ -300,15 +306,13 @@ class TilesItemResource(ItemResource):
     )
     # Without caching, this checks for permissions every time.  By using the
     # LoadModelCache, three database lookups are avoided, which saves around
-    # 6 ms in tests. We also avoid the @access.public decorator and directly
-    # set the accessLevel attribute on the method, since in some environments
-    # access.cookie and access.public decorators interact with each other and
-    # both are necessary to get cookie access to work.
+    # 6 ms in tests.
     #   @access.cookie   # access.cookie always looks up the token
     #   @access.public
     #   @loadmodel(model='item', map={'itemId': 'item'}, level=AccessType.READ)
     #   def getTile(self, item, z, x, y, params):
     #       return self._getTile(item, z, x, y, params, True)
+    @access.public
     def getTile(self, itemId, z, x, y, params):
         _adjustParams(params)
         item = loadmodelcache.loadModel(
@@ -321,7 +325,6 @@ class TilesItemResource(ItemResource):
         if redirect not in ('any', 'exact', 'encoding'):
             redirect = False
         return self._getTile(item, z, x, y, params, mayRedirect=redirect)
-    getTile.accessLevel = 'public'
 
     @describeRoute(
         Description('Get a test large image tile.')
@@ -385,6 +388,7 @@ class TilesItemResource(ItemResource):
     @access.public
     @loadmodel(model='item', map={'itemId': 'item'}, level=AccessType.READ)
     def getTilesThumbnail(self, item, params):
+#         traceback.print_stack()
         _adjustParams(params)
         params = self._parseParams(params, True, [
             ('width', int),
@@ -409,6 +413,8 @@ class TilesItemResource(ItemResource):
             item, params.get('contentDisposition'), thumbMime, 'thumbnail')
         setResponseHeader('Content-Type', thumbMime)
         setRawResponse()
+        print('(#####)large_image/server/rest/tiles.py-getTilesThumbnail():thumbMime='+str(thumbMime))
+#         print('(#####)large_image/server/rest/tiles.py-getTilesThumbnail():thumbData='+str(thumbData))
         return thumbData
 
     @describeRoute(
