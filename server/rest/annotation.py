@@ -37,7 +37,7 @@ from girder.utility import JsonEncoder
 from ..models.annotation import AnnotationSchema, Annotation
 from ..models.annotationelement import Annotationelement
 from __builtin__ import str
-from bson.objectid import ObjectId   
+from bson.objectid import ObjectId
 
 
 class AnnotationResource(Resource):
@@ -606,6 +606,8 @@ class AnnotationResource(Resource):
     def createItemAnnotations(self, item, annotations):
         print('(#####):large_image/server/rest/annotation.py:createItemAnnotations()')
         user = self.getCurrentUser()
+        if not isinstance(annotations, list):
+            annotations = [annotations]
         for entry in annotations:
             if not isinstance(entry, dict):
                 raise RestException('Entries in the annotation list must be JSON objects.')
