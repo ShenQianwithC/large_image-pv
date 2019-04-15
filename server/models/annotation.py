@@ -41,8 +41,11 @@ from .annotationelement import Annotationelement
 from .image_item import ImageItem
 from .. import constants
 
+import sys
+
 
 class AnnotationSchema(object):
+    print('(#####):large_image/server/models/annotation.py-AnnotationSchema')
     coordSchema = {
         'type': 'array',
         # TODO: validate that z==0 for now
@@ -135,6 +138,33 @@ class AnnotationSchema(object):
             }
         ]
     }
+
+
+#############################################################
+################# pv Add headmap scheam #####################
+#############################################################
+    heatMapSchema = {
+        'allOf': [
+            baseShapeSchema,
+            {
+                'type': 'object',
+                'properties': {
+                    'type': {
+                        'type': 'string',
+                        'enum': ['heatmap']
+                    },
+                    'center': coordSchema,
+                    'fillColor': colorSchema
+                },
+                'required': ['type', 'center'],
+                'patternProperties': baseShapePatternProperties,
+                'additionalProperties': False
+            }
+        ]
+    }
+#############################################################
+######################## End ################################
+#############################################################
 
     arrowShapeSchema = {
         'allOf': [
@@ -324,6 +354,7 @@ class AnnotationSchema(object):
             circleShapeSchema,
             ellipseShapeSchema,
             pointShapeSchema,
+            heatMapSchema,        # pv added
             polylineShapeSchema,
             rectangleShapeSchema,
             rectangleGridShapeSchema,
@@ -371,6 +402,7 @@ class Annotation(AccessControlledModel):
     stored as independent models to (eventually) permit faster spatial
     searching.
     """
+    print('(#####):large_image/server/models/annotation.py-Annotation')
 
     validatorAnnotation = jsonschema.Draft4Validator(
         AnnotationSchema.annotationSchema)
@@ -401,6 +433,7 @@ class Annotation(AccessControlledModel):
     )
 
     def initialize(self):
+        print('(#####):large_image/server/models/annotation.py-initialize')
         self._writeLock = threading.Lock()
         self.name = 'annotation'
         self.ensureIndices([
@@ -438,6 +471,7 @@ class Annotation(AccessControlledModel):
 
         :param event: the event with the item information.
         """
+        print('(#####):large_image/server/models/annotation.py-_onItemRemove')
         item = event.info
         annotations = Annotation().find({'itemId': item['_id']})
         for annotation in annotations:
@@ -448,6 +482,7 @@ class Annotation(AccessControlledModel):
                 Annotation().remove(annotation)
 
     def _onSettingChange(self, event):
+        print('(#####):large_image/server/models/annotation.py-_onSettingChange')
         settingDoc = event.info
         if settingDoc['key'] in (
                 constants.PluginSettings.LARGE_IMAGE_ANNOTATION_HISTORY, ):
@@ -455,6 +490,7 @@ class Annotation(AccessControlledModel):
                 constants.PluginSettings.LARGE_IMAGE_ANNOTATION_HISTORY)
 
     def _loadAndMigrateAnnotation(self, id, *args, **kwargs):
+        print('(#####):large_image/server/models/annotation.py-_loadAndMigrateAnnotation')
         """
         Load the annotation and add access control information if necessary.
         """
@@ -486,6 +522,7 @@ class Annotation(AccessControlledModel):
         object is copied from the folder containing the image the annotation is attached
         to.   In addition, the creator is given admin access.
         """
+        print('(#####):large_image/server/models/annotation.py-_migrateACL')
         if annotation is None or 'access' in annotation:
             return annotation
 
@@ -517,6 +554,7 @@ class Annotation(AccessControlledModel):
         return annotation
 
     def createAnnotation(self, item, creator, annotation, public=None):
+        print('(#####):large_image/server/models/annotation.py-createAnnotation')
         now = datetime.datetime.utcnow()
         doc = {
             'itemId': item['_id'],
@@ -579,6 +617,7 @@ class Annotation(AccessControlledModel):
                     break
                 annotation = recheck
 
+        print('(#####):large_image/server/models/annotation.py-load:annotation='+str(annotation))
         self.injectAnnotationGroupSet(annotation)
         return annotation
 
@@ -591,6 +630,7 @@ class Annotation(AccessControlledModel):
 
         :param annotation: the annotation document to remove.
         """
+        print('(#####):large_image/server/models/annotation.py-remove')
         if self._historyEnabled:
             # just mark the annotations as inactive
             result = self.update({'_id': annotation['_id']}, {'$set': {'_active': False}})
@@ -628,6 +668,7 @@ class Annotation(AccessControlledModel):
         :returns: the saved document.  If it is a new document, the _id has
                   been added.
         """
+        print('(#####):large_image/server/models/annotation.py-save"')
         starttime = time.time()
         with self._writeLock:
             replace_one = self.collection.replace_one
@@ -649,6 +690,7 @@ class Annotation(AccessControlledModel):
         annotation.pop('_annotationId', None)
 
         def replaceElements(query, doc, *args, **kwargs):
+            print('(#####):large_image/server/models/annotation.py-replaceElements"')
             Annotationelement().updateElements(doc)
             elements = doc['annotation'].pop('elements', None)
             if self._historyEnabled:
@@ -665,6 +707,7 @@ class Annotation(AccessControlledModel):
             return ret
 
         def insertElements(doc, *args, **kwargs):
+            print('(#####):large_image/server/models/annotation.py-insertElements"')
             # When creating an annotation, store the elements first, then store
             # the annotation without elements, then restore the elements.
             doc.setdefault('_id', ObjectId())
@@ -706,6 +749,7 @@ class Annotation(AccessControlledModel):
         :param updateUser: the user who is creating the update.
         :returns: the annotation document that was updated.
         """
+        print('(#####):large_image/server/models/annotation.py-updateAnnotation"')
         annotation['updated'] = datetime.datetime.utcnow()
         annotation['updatedId'] = updateUser['_id'] if updateUser else None
         return self.save(annotation)
@@ -729,6 +773,7 @@ class Annotation(AccessControlledModel):
         # This function exceeds the recommended complexity, but since it is
         # needs to be relatively fast, breaking it into smaller functions is
         # probably undesireable.
+        print('(#####):large_image/server/models/annotation.py-_similarElementStructure"')
         if type(a) != type(b):
             return False
         if isinstance(a, dict):
@@ -764,6 +809,7 @@ class Annotation(AccessControlledModel):
         return True
 
     def validate(self, doc):
+        print('(#####):large_image/server/models/annotation.py-validate"')
         starttime = time.time()
         try:
             # This block could just use the json validator:
@@ -809,6 +855,7 @@ class Annotation(AccessControlledModel):
         :param force: if True, don't authenticate the user.
         :yields: the entries in the list
         """
+        print('(#####):large_image/server/models/annotation.py-versionList"')
         if annotationId and not isinstance(annotationId, ObjectId):
             annotationId = ObjectId(annotationId)
         # Make sure we have only one of each version, plus apply our filter and
@@ -836,6 +883,7 @@ class Annotation(AccessControlledModel):
             have read access on the item and the item must exist.
         :param force: if True, don't get the user access.
         """
+        print('(#####):large_image/server/models/annotation.py-getVersion"')
         if annotationId and not isinstance(annotationId, ObjectId):
             annotationId = ObjectId(annotationId)
         entry = self.findOne({
@@ -861,6 +909,7 @@ class Annotation(AccessControlledModel):
         :param force: if True don't authenticate the user with the associated
             item access.
         """
+        print('(#####):large_image/server/models/annotation.py-revertVersion"')
         if version is None:
             oldVersions = list(Annotation().versionList(id, limit=2, force=True))
             if len(oldVersions) >= 1 and oldVersions[0].get('_active') is False:
@@ -892,6 +941,7 @@ class Annotation(AccessControlledModel):
             by the regex ``[\W_]+``  This filter is case-insensitive.
         :param creator: Filter by a user who is the creator of the annotation.
         """
+        print('(#####):large_image/server/models/annotation.py-findAnnotatedImages"')
         query = {'_active': {'$ne': False}}
         if creator:
             query['creatorId'] = creator['_id']
@@ -927,6 +977,7 @@ class Annotation(AccessControlledModel):
         return images
 
     def _matchImageName(self, imageName, matchString):
+        print('(#####):large_image/server/models/annotation.py-_matchImageName"')
         matchString = matchString.lower()
         imageName = imageName.lower()
         if imageName.startswith(matchString):
@@ -938,6 +989,7 @@ class Annotation(AccessControlledModel):
         return False
 
     def injectAnnotationGroupSet(self, annotation):
+        print('(#####):large_image/server/models/annotation.py-injectAnnotationGroupSet"')
         if 'groups' not in annotation:
             annotation['groups'] = Annotationelement().getElementGroupSet(annotation)
             query = {
